@@ -29,8 +29,9 @@
     }
   }
 
-  // Forms: build a text message to Darren with the details.
-  // There is no server on this site, so the visitor's own phone sends the text.
+  // Forms: email the request to Darren (FormSubmit, no server needed).
+  // If the email fails for any reason, fall back to a pre-filled text.
+  var EMAIL_ENDPOINT = 'https://formsubmit.co/ajax/dk@peekaboodoors.com';
   var labels = {
     name: 'Name', phone: 'Phone', city: 'City', service: 'Service',
     issue: 'Issue', day: 'Best day', time: 'Best time', method: 'Contact by', details: 'Details'
@@ -40,24 +41,59 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var status = form.querySelector('.form-status');
+      var button = form.querySelector('button[type="submit"]');
       if (!form.checkValidity()) { form.reportValidity(); return; }
 
       var data = new FormData(form);
       var lines = ['Website request for Peekaboo Garage Doors'];
+      var payload = {};
       data.forEach(function (value, key) {
         value = String(value).trim();
-        if (value) lines.push((labels[key] || key) + ': ' + value);
+        if (value) {
+          lines.push((labels[key] || key) + ': ' + value);
+          payload[labels[key] || key] = value;
+        }
       });
-      var body = encodeURIComponent(lines.join('\n'));
-      var isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
-      var smsHref = 'sms:' + PHONE + (isApple ? '&' : '?') + 'body=' + body;
+      var page = document.title.split('|')[0].trim();
+      payload['Form'] = page;
+      payload._subject = 'New website request: ' + (payload.Name || 'Customer') + ' (' + page + ')';
+      payload._template = 'table';
+      payload._captcha = 'false';
 
-      if (status) {
-        status.classList.remove('error');
-        status.innerHTML = 'Almost done. Your text to Darren is ready, tap <strong>Send</strong> in your messages app to finish. ' +
-          'If nothing opened, <a href="tel:' + PHONE + '">call or text ' + PHONE_DISPLAY + '</a>.';
+      function textFallback() {
+        var body = encodeURIComponent(lines.join('\n'));
+        var isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+        var smsHref = 'sms:' + PHONE + (isApple ? '&' : '?') + 'body=' + body;
+        if (status) {
+          status.classList.remove('error');
+          status.innerHTML = 'Almost done. Your text to Darren is ready, tap <strong>Send</strong> in your messages app to finish. ' +
+            'If nothing opened, <a href="tel:' + PHONE + '">call or text ' + PHONE_DISPLAY + '</a>.';
+        }
+        window.location.href = smsHref;
       }
-      window.location.href = smsHref;
+
+      if (button) { button.disabled = true; button.dataset.label = button.textContent; button.textContent = 'Sending...'; }
+      if (status) { status.classList.remove('error'); status.textContent = ''; }
+
+      fetch(EMAIL_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok || String(res.j.success) !== 'true') throw new Error(res.j.message || 'send failed');
+          form.reset();
+          if (button) { button.textContent = 'Sent'; }
+          if (status) {
+            status.innerHTML = '<strong>Got it.</strong> Darren has your request and will reach out soon. ' +
+              'Want to send a photo of the door? <a href="sms:' + PHONE + '">Text it to ' + PHONE_DISPLAY + '</a>.';
+          }
+        })
+        .catch(function () {
+          if (button) { button.disabled = false; button.textContent = button.dataset.label; }
+          textFallback();
+        });
     });
   });
 })();
